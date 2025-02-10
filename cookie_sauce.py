@@ -2,71 +2,76 @@ import requests
 from bs4 import BeautifulSoup
 import os
 import time
-import img2pdf
+from PIL import Image
+from reportlab.pdfgen import canvas
 
-#Ask info for gallery download
 new_dir_name = "tool_cache"
 pdf_title = input("Title for the PDF -> ")
-first_image_url = input("Enter the first image URL -> ")
+first_image_url = input("Enter first image URL -> ")
 number_of_images = int(input("Number of images -> "))
 
-# Accepted formats // DO NOT MODIFY //
-accepted_formats = ["jpg", "png"]
+accepted_formats = ["jpg", "jpeg", "png", "webp"]
 
-#Create folder to download images
 current_dir = os.path.dirname(os.path.abspath(__file__))
 new_dir_path = os.path.join(current_dir, new_dir_name)
 os.makedirs(new_dir_path, exist_ok=True)
 
-# User-Agent header
+# Header User-Agent
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"}
 
-#Get the first image of the gallery
 r = requests.get(first_image_url, headers=headers)
 soup = BeautifulSoup(r.content, 'html5lib')
 
-# Counter for downloaded images
 img_counter = 0
+image_files = []
 
-#Loop through the gallery
 for i in range(0, number_of_images):
-    if(i != 0):
+    if i != 0:
         r = requests.get(loop_url, headers=headers)
         soup = BeautifulSoup(r.content, 'html5lib')
 
-    #Search current image, download and save it.
     div = soup.find("div", id="i3")
     img_url = div.find("img")["src"]
+    extension = os.path.splitext(img_url)[-1].lstrip(".").lower()
 
-    # Extract extension from file
-    extension = os.path.splitext(img_url)[-1].lstrip(".")
-
-    # Verify if file format is allowed. 
-    if extension.lower() in accepted_formats:
+    if extension in accepted_formats:
         response = requests.get(img_url, headers=headers, stream=True)
         if response.status_code == 200:
-            with open(os.path.join(new_dir_path, str(img_counter) + "."+extension), 'wb') as out_file:
+            img_path = os.path.join(new_dir_path, f"{img_counter}.{extension}")
+            with open(img_path, 'wb') as out_file:
                 out_file.write(response.content)
+
+            if extension != "jpg":
+                img = Image.open(img_path).convert("RGB")
+                img_path_jpg = os.path.join(new_dir_path, f"{img_counter}.jpg")
+                img.save(img_path_jpg, "JPEG")
+                os.remove(img_path)
+                img_path = img_path_jpg
+
+            image_files.append(img_path)
             img_counter += 1
 
-    #Extract next URL
     next_link = soup.find("a", id="next")
     loop_url = next_link["href"]
-    
-    print("[Info] - Done with page "+str(i+1)+" out of "+str(number_of_images))
+
+    print(f"[Info] - Page {i+1}/{number_of_images} downloaded")
     time.sleep(1.5)
 
-#Convert to PDF
-print("[Info] - Building PDF, please wait")
-with open(os.path.join(current_dir, pdf_title+".pdf"), "wb") as f:
-    imgs = []
-    for i in range(img_counter):
-        try:
-            imgs.append(open(os.path.join(new_dir_path, str(i)+".jpg"),"rb"))
-        except:
-            imgs.append(open(os.path.join(new_dir_path, str(i)+".png"),"rb")) 
-    f.write(img2pdf.convert(imgs))
-#Clear cache
-for filename in os.listdir(new_dir_path):
-    file_path = os.path.join(new_dir_path, filename)
-    os.remove(file_path)
+print("[Info] - Generating PDF, please wait...")
+pdf_path = os.path.join(current_dir, f"{pdf_title}.pdf")
+c = canvas.Canvas(pdf_path)
+
+for img_path in image_files:
+    img = Image.open(img_path)
+    width, height = img.size
+    c.setPageSize((width, height))
+    c.drawImage(img_path, 0, 0, width, height)
+    c.showPage()
+
+c.save()
+
+for img_path in image_files:
+    os.remove(img_path)
+os.rmdir(new_dir_path)
+
+print(f"[Info] - PDF '{pdf_title}.pdf' successfully generated, enjoy !")
